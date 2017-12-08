@@ -189,7 +189,7 @@ void game(int width, int height, int num_timesteps)
   {
     // TODO 2: implement evolve function(see above)
     evolve(currentfield, newfield, width, height);
-    //write_field(newfield, width, height, time);
+    write_field(newfield, width, height, time);
 
     // TODO 3: implement SWAP of the fields
     char *temp = currentfield;
