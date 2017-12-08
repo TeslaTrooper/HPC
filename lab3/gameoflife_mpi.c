@@ -95,14 +95,26 @@ void write_field (char* currentfield, int width, int height, int timestep) {
    */
 }
 
-
+int countLifingsPeriodic(char *currentfield, int x, int y, int w, int h)
+{
+  int n = 0;
+  for (int y1 = y - 1; y1 <= y + 1; y1++)
+  {
+    for (int x1 = x - 1; x1 <= x + 1; x1++)
+    {
+      if (currentfield[calcIndex(w, (x1 + w) % w, (y1 + h) % h)])
+      {
+        n++;
+      }
+    }
+  }
+  return n;
+}
 
 
 void evolve (char* currentfield, char* newfield, int width, int height) {
-  #pragma omp parallel num_threads(4)
-    {
-      int threadID = __builtin_omp_get_thread_num();
-      int numThreads = __builtin_omp_get_num_threads();
+      int threadID = 0;
+      int numThreads = 0;
       int numBlocksX = 2;
       int numBlocksY = 2;
 
@@ -127,7 +139,7 @@ void evolve (char* currentfield, char* newfield, int width, int height) {
           newfield[calcIndex(width, x, y)] = (n == 3 || (n == 2 && currentfield[calcIndex(width, x, y)]));
         }
       }
-    }
+
 }
 
 void filling_random (char * currentfield, int width, int height) {
@@ -257,9 +269,12 @@ int main (int c, char **v) {
     /* TODO Create a new cartesian communicator of the worker communicator and get the information.
     */
 
-    int gsizes[2] = {width, height};  // global size of the domain without boundaries
-    int lsizes[2];
 
+    int dims[2] = {2, 2};
+    int periods[2] = {1, 1};
+
+    MPI_Comm comm;
+    MPI_Cart_create(workerscomm, 2, dims, periods, 0, &comm);
 
     /* TODO create and commit a subarray as a new filetype to describe the local
      *      worker field as a part of the global field.
