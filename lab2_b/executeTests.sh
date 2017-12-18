@@ -6,8 +6,7 @@ do
         for i in {1..5}
         do
             echo "Gebietsgröße: $x, NumThreads=$y"
-            time OMP_NUM_THREADS=$y ./gameoflife $x $x 30
-            echo -e "\n"
+            time OMP_NUM_THREADS=$y ./gameoflife $x $x 20
         done
-    done 
+    done
 done

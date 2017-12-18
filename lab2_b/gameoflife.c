@@ -100,8 +100,6 @@ int countLifingsPeriodic(char *currentfield, int x, int y, int w, int h)
 
 void evolve(char *currentfield, char *newfield, int width, int height)
 {
-// TODO traverse through each voxel and implement game of live logic
-// HINT: avoid boundaries
 #pragma omp parallel num_threads(4)
   {
     int threadID = __builtin_omp_get_thread_num();
@@ -189,7 +187,7 @@ void game(int width, int height, int num_timesteps)
   {
     // TODO 2: implement evolve function(see above)
     evolve(currentfield, newfield, width, height);
-    write_field(newfield, width, height, time);
+    //write_field(newfield, width, height, time);
 
     // TODO 3: implement SWAP of the fields
     char *temp = currentfield;

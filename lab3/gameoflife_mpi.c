@@ -215,7 +215,7 @@ int main (int c, char **v) {
   printf("my rank is: %d\n",rank_global);
   // TODO get the number of processes and save it to num_tasks_global variable
   MPI_Comm_size(MPI_COMM_WORLD, &num_tasks_global);   //-
-
+  printf("Num threads: %d \n", num_tasks_global);
   /* Abort if the number of processes does not match with the given configuration.
    */
   if (num_tasks_global != (process_numX*process_numY+1)) {
@@ -266,15 +266,21 @@ int main (int c, char **v) {
       }
     }
   } else {
-    /* TODO Create a new cartesian communicator of the worker communicator and get the information.
-    */
-
-
     int dims[2] = {2, 2};
     int periods[2] = {1, 1};
+    int start_indices[2], coords[2], lsizes[2], gsizes[2];
 
     MPI_Comm comm;
     MPI_Cart_create(workerscomm, 2, dims, periods, 0, &comm);
+
+    MPI_Comm_rank(comm, &rank);
+    MPI_Cart_coords(comm, rank, 2, coords);
+
+    start_indices[0] = coords[0] * lsizes[0];
+    start_indices[1] = coords[1] * lsizes[1];
+
+    MPI_Type_create_subarray(2, gsizes, lsizes, start_indices,MPI_ORDER_C, MPI_FLOAT, &filetype);
+    MPI_Type_commit(&filetype);
 
     /* TODO create and commit a subarray as a new filetype to describe the local
      *      worker field as a part of the global field.
@@ -288,6 +294,24 @@ int main (int c, char **v) {
      *      This is another subarray datatype!
      *      Use the global variable 'memtype'.
     */
+    int memsizes[2];
+    MPI_File fh;
+    float *local_array;
+    MPI_Status status;
+
+    MPI_File_open(MPI_COMM_WORLD, "./gol/datafile", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
+    MPI_File_set_view(fh, 0, MPI_FLOAT, filetype, "native", MPI_INFO_NULL);
+
+    memsizes[0] = lsizes[0] + 8; /* no. of rows in allocated array */
+    memsizes[1] = lsizes[1] + 8; /* no. of columns in allocated array */
+    start_indices[0] = start_indices[1] = 4;
+
+    MPI_Type_create_subarray(2, memsizes, lsizes, start_indices, MPI_ORDER_C, MPI_FLOAT, &memtype);
+
+    MPI_Type_commit(&memtype);
+    MPI_File_write_all(fh, local_array, 1, memtype, &status);
+    MPI_File_close(&fh);
+
 
     game (lsizes[X], lsizes[Y], num_timesteps, gsizes);
 
