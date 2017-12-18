@@ -77,22 +77,14 @@ void write_field (char* currentfield, int width, int height, int timestep) {
   snprintf (filename, 1024, "./gol/gol-%05d.vtk", timestep);
   MPI_Offset header_offset = (MPI_Offset)strlen(vtk_header);
 
-    /* TODO Create a new file handle for collective I/O
-     *      Use the global 'file' variable.
-   */
-  /* TODO Set the file view for the file handle using collective I/O
-   *
-   */
-  // rc = ...
+   MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &file);
+   //TODO: Do position calculation for the view.
+   int pos = 0;
+   MPI_File_set_view(file, pos, MPI_CHAR, filetype, "native", MPI_INFO_NULL);
 
-  /* TODO Write the data using collective I/O
-   *
-   */
-
-
-  /* TODO Close the file handle.
-   *
-   */
+   float *local_array;
+   MPI_File_write_all(file, local_array, 1, memtype, &status);
+   MPI_File_close(&file);
 }
 
 int countLifingsPeriodic(char *currentfield, int x, int y, int w, int h)
@@ -266,21 +258,26 @@ int main (int c, char **v) {
       }
     }
   } else {
-    int dims[2] = {2, 2};
+    int dims[2] = {process_numX, process_numY};
     int periods[2] = {1, 1};
     int start_indices[2], coords[2], lsizes[2], gsizes[2];
 
     MPI_Comm comm;
-    MPI_Cart_create(workerscomm, 2, dims, periods, 0, &comm);
+    MPI_Cart_create(workerscomm, 2, dims, periods, 1, &comm);
 
     MPI_Comm_rank(comm, &rank);
-    MPI_Cart_coords(comm, rank, 2, coords);
+    MPI_Cart_coords(comm, rank, 2, &coords);
+
+    lsizes[0] = gsizes[0] / dims[0];
+    lsizes[1] = gsizes[1] / dims[1];
 
     start_indices[0] = coords[0] * lsizes[0];
     start_indices[1] = coords[1] * lsizes[1];
 
-    MPI_Type_create_subarray(2, gsizes, lsizes, start_indices,MPI_ORDER_C, MPI_FLOAT, &filetype);
+    MPI_Type_create_subarray(2, gsizes, lsizes, start_indices, MPI_ORDER_C, MPI_CHAR, &filetype);
     MPI_Type_commit(&filetype);
+
+    // filetype ist teilspielfeld von einem thread
 
     /* TODO create and commit a subarray as a new filetype to describe the local
      *      worker field as a part of the global field.
@@ -295,23 +292,15 @@ int main (int c, char **v) {
      *      Use the global variable 'memtype'.
     */
     int memsizes[2];
-    MPI_File fh;
-    float *local_array;
     MPI_Status status;
 
-    MPI_File_open(MPI_COMM_WORLD, "./gol/datafile", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
-    MPI_File_set_view(fh, 0, MPI_FLOAT, filetype, "native", MPI_INFO_NULL);
+    memsizes[0] = lsizes[0] + 2; /* no. of rows in allocated array */
+    memsizes[1] = lsizes[1] + 2; /* no. of columns in allocated array */
+    start_indices[0] = start_indices[1] = 1;
 
-    memsizes[0] = lsizes[0] + 8; /* no. of rows in allocated array */
-    memsizes[1] = lsizes[1] + 8; /* no. of columns in allocated array */
-    start_indices[0] = start_indices[1] = 4;
-
-    MPI_Type_create_subarray(2, memsizes, lsizes, start_indices, MPI_ORDER_C, MPI_FLOAT, &memtype);
-
+    // memtype ist teilspielfeld von einem thread + ränder
+    MPI_Type_create_subarray(2, memsizes, lsizes, start_indices, MPI_ORDER_C, MPI_CHAR, &memtype);
     MPI_Type_commit(&memtype);
-    MPI_File_write_all(fh, local_array, 1, memtype, &status);
-    MPI_File_close(&fh);
-
 
     game (lsizes[X], lsizes[Y], num_timesteps, gsizes);
 
