@@ -65,6 +65,7 @@ void create_vtk_header (char * header, int width, int height, int timestep) {
 
 
 void write_field (char* currentfield, int width, int height, int timestep) {
+  MPI_Status status;
   if (timestep == 0){
     if(rank==0) {
       mkdir("./gol/", 0777);
@@ -77,13 +78,15 @@ void write_field (char* currentfield, int width, int height, int timestep) {
   snprintf (filename, 1024, "./gol/gol-%05d.vtk", timestep);
   MPI_Offset header_offset = (MPI_Offset)strlen(vtk_header);
 
-   MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &file);
-   //TODO: Do position calculation for the view.
-   int pos = 0;
-   MPI_File_set_view(file, pos, MPI_CHAR, filetype, "native", MPI_INFO_NULL);
+   MPI_File_open(workerscomm, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &file);
 
-   float *local_array;
-   MPI_File_write_all(file, local_array, 1, memtype, &status);
+   if(rank == 0) {
+     MPI_File_write(file, vtk_header, 2048, MPI_CHAR, &status);
+   }
+
+   MPI_File_set_view(file, header_offset, MPI_CHAR, filetype, "native", MPI_INFO_NULL);
+
+   MPI_File_write_all(file, currentfield, sizeof(currentfield), filetype, &status);
    MPI_File_close(&file);
 }
 
@@ -105,33 +108,18 @@ int countLifingsPeriodic(char *currentfield, int x, int y, int w, int h)
 
 
 void evolve (char* currentfield, char* newfield, int width, int height) {
-      int threadID = 0;
-      int numThreads = 0;
-      int numBlocksX = 2;
-      int numBlocksY = 2;
-
-      int myBlockX = threadID % numBlocksX;
-      int myBlockY = threadID / numBlocksY;
-
-      int myStartX = myBlockX * ((width - 2) / numBlocksX) + 1;
-      int myStartY = myBlockY * ((height - 2) / numBlocksY) + 1;
-      int myEndX = (myBlockX + 1) * ((width - 2) / numBlocksX) + 1;
-      int myEndY = (myBlockY + 1) * ((height - 2) / numBlocksY) + 1;
-      //printf("ThreadID %d, startx: %d, starty: %d, endx: %d, endy: %d \n", threadID, myStartX, myStartY, myEndX, myEndY);
-
-      for (int y = myStartY; y < myEndY; y++)
+  for (int y = 1; y < height - 1; y++)
+  {
+    for (int x = 1; x < width - 1; x++)
+    {
+      int n = countLifingsPeriodic(currentfield, x, y, width, height);
+      if (currentfield[calcIndex(width, x, y)])
       {
-        for (int x = myStartX; x < myEndX; x++)
-        {
-          int n = countLifingsPeriodic(currentfield, x, y, width, height);
-          if (currentfield[calcIndex(width, x, y)])
-          {
-            n--;
-          }
-          newfield[calcIndex(width, x, y)] = (n == 3 || (n == 2 && currentfield[calcIndex(width, x, y)]));
-        }
+        n--;
       }
-
+      newfield[calcIndex(width, x, y)] = (n == 3 || (n == 2 && currentfield[calcIndex(width, x, y)]));
+    }
+  }
 }
 
 void filling_random (char * currentfield, int width, int height) {
@@ -156,16 +144,19 @@ void game (int width, int height, int num_timesteps, int gsizes[2]) {
   char *currentfield = calloc (width * height, sizeof(char));
   char *newfield = calloc (width * height, sizeof(char));
 
-  // TODO 1: use your favorite filling
+  filling_runner(currentfield, width, height);
 
   int time = 0;
   write_field (currentfield, gsizes[X], gsizes[Y], time);
 
   for (time = 1; time <= num_timesteps; time++) {
-    // TODO 2: implement evolve function (see above)
     evolve (currentfield, newfield, width, height);
     write_field (newfield, gsizes[X], gsizes[Y], time);
-    // TODO 3: implement SWAP of the fields
+
+
+    char* temp = currentfield;
+    currentfield = newfield;
+    newfield = temp;
 
   }
 
@@ -202,10 +193,9 @@ int main (int c, char **v) {
 
 
 
-  // TODO get the global rank of the process and save it to rank_global
   MPI_Comm_rank(MPI_COMM_WORLD, &rank_global);        //-
   printf("my rank is: %d\n",rank_global);
-  // TODO get the number of processes and save it to num_tasks_global variable
+
   MPI_Comm_size(MPI_COMM_WORLD, &num_tasks_global);   //-
   printf("Num threads: %d \n", num_tasks_global);
   /* Abort if the number of processes does not match with the given configuration.
@@ -260,13 +250,15 @@ int main (int c, char **v) {
   } else {
     int dims[2] = {process_numX, process_numY};
     int periods[2] = {1, 1};
-    int start_indices[2], coords[2], lsizes[2], gsizes[2];
+    int start_indices[2], coords[2], lsizes[2];
+
+    int gsizes[2] = {width, height};
 
     MPI_Comm comm;
     MPI_Cart_create(workerscomm, 2, dims, periods, 1, &comm);
 
     MPI_Comm_rank(comm, &rank);
-    MPI_Cart_coords(comm, rank, 2, &coords);
+    MPI_Cart_coords(comm, rank, 2, coords);
 
     lsizes[0] = gsizes[0] / dims[0];
     lsizes[1] = gsizes[1] / dims[1];
@@ -274,6 +266,7 @@ int main (int c, char **v) {
     start_indices[0] = coords[0] * lsizes[0];
     start_indices[1] = coords[1] * lsizes[1];
 
+    printf("DEBUG: Rank: %d gsizes[0]: %d gsizes[1]: %d \n", rank, gsizes[0], gsizes[1]);
     MPI_Type_create_subarray(2, gsizes, lsizes, start_indices, MPI_ORDER_C, MPI_CHAR, &filetype);
     MPI_Type_commit(&filetype);
 
@@ -292,7 +285,7 @@ int main (int c, char **v) {
      *      Use the global variable 'memtype'.
     */
     int memsizes[2];
-    MPI_Status status;
+
 
     memsizes[0] = lsizes[0] + 2; /* no. of rows in allocated array */
     memsizes[1] = lsizes[1] + 2; /* no. of columns in allocated array */
@@ -304,7 +297,7 @@ int main (int c, char **v) {
 
     game (lsizes[X], lsizes[Y], num_timesteps, gsizes);
 
-    if (1 == rank) {
+    if (1 == rank_global) {
       long buffer = 0;
       MPI_Send(&buffer, 1, MPI_LONG, 0, GOL_FINISH_TAG, MPI_COMM_WORLD);
     }
